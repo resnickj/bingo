@@ -1,0 +1,216 @@
+<html>
+<head>
+	<title></title>
+	<script type="text/javascript">
+
+		/* title of the game */
+		const TITLE = "Boardroom Bingo";
+
+		/* board size */
+		const BOARD_SIZE = 5;
+
+		/* ID of Google Sheet that contains the word list; replace with your own.
+		   Note: word list must contain at least sqr(BOARD_SIZE) words!	 */
+		const GOOGLE_SHEET_ID = '1bIfEnnMGC-0Ol2gi9LS-UTjeDA3uKjQHlCEDKnM2Dec';
+
+		/* zero-based column index of the relevant column in the Google Sheet */
+		const GOOGLE_SHEET_COLUMN = 0;
+
+		/* Set this to true to display a link on the page to open the Google
+		   Sheet containing the word list in a separate tab. */
+		const SHOW_WORDLIST_LINK = false;
+
+		async function loadWords() {
+			const url = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/export?format=csv`;
+
+			const response = await fetch(url);
+			if(!response.ok)
+				throw new Error(`HTTP ${response.status} ${response.statusText}`);
+
+			const csvText = await response.text();
+
+			// Split by newlines, remove empty rows
+			const lines = csvText
+				.split(/\r?\n/)
+				.filter(line => line.trim() !== "");
+
+			// Take the specified column from each line
+			return lines
+				.map(line => Array.from(parseCsvRow(line))[GOOGLE_SHEET_COLUMN]);
+		}
+
+		function* parseCsvRow(rowText) {
+			const EoL = '', COMMA = ',', DQUOTE = '"';
+			let i = 0;
+			const look = () => rowText.charAt(i);
+			const next = () => rowText.charAt(i++);
+			const accept = (c) => look() === c ? (++i) && true : false;
+
+			const unquotedField = () => {
+				let value = "";
+				while (!accept(COMMA) && !accept(EoL))
+					value += next();
+				return value;
+			};
+			const quotedField = () => {
+				let value = "";
+				while (true) {
+					if (accept(DQUOTE)) {
+						if (accept(DQUOTE))
+							value += DQUOTE;
+						else if (accept(COMMA) || accept(EoL))
+							return value;
+						else 
+							throw new Error("Invalid CSV format: " + rowText);
+					} else {
+						value += next();
+					}
+				}
+			};
+			const field = () => accept(DQUOTE)
+				? quotedField() : unquotedField();
+
+			while (look() != EoL) yield field();
+		}
+
+		document.title = TITLE;
+		const wordsPromise = loadWords();
+		let words;
+		const boardState = [];
+
+		async function onReady() {
+			document.getElementById("title").textContent = TITLE;
+
+			const wordListLink = document.getElementById("googleSheetLink");
+
+			if(SHOW_WORDLIST_LINK) {
+				wordListLink.setAttribute("href", 
+					`https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/edit`);
+			} else {
+				wordListLink.style.display = "none";
+			}
+
+			try {
+				words = await wordsPromise;
+			} catch(e) {
+				document.getElementById("error").textContent =
+					 `Error loading word list: ${e.message}`;
+				return;
+			}
+
+			shuffleWords();
+			createBoard();
+		}
+
+		function shuffleWords() {
+			// Fisher-Yates shuffle
+			for (let i = words.length - 1; i > 0; i--) {
+				const j = Math.floor(Math.random() * (i + 1));
+				[words[i], words[j]] = [words[j], words[i]];
+			}
+		}
+
+		function createBoard() {
+			const boardTable = document.getElementById('board');
+			for (let r = 0; r < BOARD_SIZE; r++) {
+				boardState[r] = [];
+				const tr = boardTable.insertRow(r);
+				for (let c = 0; c < BOARD_SIZE; c++) {
+					boardState[r][c] = false;
+					createCell(tr, r, c);
+				}
+			}
+		}
+
+		function createCell(tr, r, c) {
+			const td = tr.insertCell(c);
+			td.onclick = function () {
+				boardState[r][c] = !(boardState[r][c]);
+				td.className = (boardState[r][c]) ? "on" : "off";
+				setBingo(checkWin());
+			};
+			td.className = "";
+			td.innerHTML = words[r * BOARD_SIZE + c];
+		}
+
+		function checkWin() {
+			for (let i = 0; i < BOARD_SIZE; i++) {
+				if (test(rowScanner(i)))
+					return true;
+				if (test(colScanner(i)))
+					return true;
+			}
+			if (test(diagDownScanner()))
+				return true;
+			if (test(diagUpScanner()))
+				return true;
+
+			return false;
+		}
+
+		function rowScanner(r) {
+			return (i) => boardState[r][i];
+		}
+		function colScanner(c) {
+			return (i) => boardState[i][c];
+		}
+		function diagDownScanner() {
+			return (i) => boardState[i][i];
+		}
+		function diagUpScanner() {
+			return (i) => boardState[i][BOARD_SIZE - i - 1];
+		}
+		function test(scanFunc) {
+			const x = [];
+			for (let i = 0; i < BOARD_SIZE; i++) {
+				if (!scanFunc(i))
+					return false;
+			}
+			return true;
+		}
+		function setBingo(b) {
+			const bingoDiv = document.getElementById('bingo');
+			bingoDiv.textContent = b ? "stand up and say Bingo!" : "";
+		}
+
+	</script>
+	<style>
+		body {
+			font-family: sans-serif;
+		}
+
+		.on {
+			background-color: #000000;
+			color: #FFFFFF;
+		}
+
+		.off {
+			background-color: #FFFFFF;
+			color: #000000;
+		}
+
+		#bingo {
+			font-size: 60pt;
+		}
+
+		#title {
+			font-size: 30pt;
+		}
+	</style>
+</head>
+
+<body onload="javascript:onReady()">
+	<p id="title" align="center">
+	</p>
+	<p id="error" align="center">
+	</p>
+	<table id="board" border="1" align="center" cellpadding="10">
+	</table>
+	<div id="bingo" align="center"></div>
+	<p align="center">
+		<a id="googleSheetLink" href="" target="_blank">
+			Word List
+		</a>
+	</p>
+</body>
+</html>
